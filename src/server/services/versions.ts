@@ -1,7 +1,7 @@
 // Rule 7.2 — versioning engine shared by every editing context.
 import { and, eq, ne, sql } from "drizzle-orm";
 import type { DbOrTx } from "@/server/db";
-import { bitItems, boardItems, cardVersions, cards, type Card, type CardVersion } from "@/db/schema";
+import { bitItems, bits, boardItems, cardVersions, cards, type Card, type CardVersion } from "@/db/schema";
 import { contextLabel, nextBranch, shouldEditInPlace, shouldIncrementEditCount } from "@/domain/versioning";
 import { wordCount } from "@/domain/title-split";
 import { DomainError, limitReached } from "@/server/errors";
@@ -171,7 +171,11 @@ function refTypeFor(t: VersionContext): "board" | "bit" | "set" | "session" | nu
 async function movePinsAndCurrent(db: DbOrTx, cardId: string, versionId: string, ctx: EditContext) {
   await db.update(cards).set({ currentVersionId: versionId }).where(eq(cards.id, cardId));
   if (ctx.container?.kind === "board_item") await db.update(boardItems).set({ pinnedVersionId: versionId }).where(eq(boardItems.id, ctx.container.id));
-  if (ctx.container?.kind === "bit_item") await db.update(bitItems).set({ pinnedVersionId: versionId }).where(eq(bitItems.id, ctx.container.id));
+  if (ctx.container?.kind === "bit_item") {
+    const [item] = await db.update(bitItems).set({ pinnedVersionId: versionId, updatedAt: new Date() }).where(eq(bitItems.id, ctx.container.id)).returning({ bitId: bitItems.bitId });
+    // A moved pin changes the bit, which matters for "changed since anchor".
+    if (item) await db.update(bits).set({ updatedAt: new Date() }).where(eq(bits.id, item.bitId));
+  }
 }
 
 /** Rule V7 — fork from a version: identical text as a child, becomes current. */
