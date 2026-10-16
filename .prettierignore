@@ -1,0 +1,8 @@
+node_modules
+.next
+pnpm-lock.yaml
+drizzle/*.sql
+public/sw.js
+design/wireframes
+playwright-report
+test-results
