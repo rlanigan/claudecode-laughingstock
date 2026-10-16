@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { loadEnv } from "./load-env";
 
 loadEnv();
-process.env.NODE_ENV ??= "development";
+if (!process.env.NODE_ENV) Object.assign(process.env, { NODE_ENV: "development" });
 
 async function main() {
   const { getDb, closeDb } = await import("@/server/db");

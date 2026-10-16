@@ -15,8 +15,8 @@ export async function listSubjects(userId: string, q: { q?: string; sort: "name"
     .select({
       id: subjectTags.id,
       name: subjectTags.name,
-      count: sql<number>`(select count(*) from card_subject_tags cst join cards c on c.id = cst.card_id where cst.tag_id = ${subjectTags.id} and c.killed_at is null)::int`,
-      lastUsedAt: sql<string | null>`(select max(cst.created_at) from card_subject_tags cst where cst.tag_id = ${subjectTags.id})`,
+      count: sql<number>`(select count(*) from card_subject_tags cst join cards c on c.id = cst.card_id where cst.tag_id = subject_tags.id and c.killed_at is null)::int`,
+      lastUsedAt: sql<string | null>`(select max(cst.created_at) from card_subject_tags cst where cst.tag_id = subject_tags.id)`,
     })
     .from(subjectTags)
     .where(and(eq(subjectTags.userId, userId), q.q ? ilike(subjectTags.name, `%${q.q.toLowerCase()}%`) : sql`true`))
@@ -30,7 +30,7 @@ export async function listSubjects(userId: string, q: { q?: string; sort: "name"
 
 export async function usageRankedSubjects(db: DbOrTx, userId: string, limit = 200): Promise<{ id: string; name: string; count: number }[]> {
   const rows = await db
-    .select({ id: subjectTags.id, name: subjectTags.name, count: sql<number>`(select count(*) from card_subject_tags cst where cst.tag_id = ${subjectTags.id})::int` })
+    .select({ id: subjectTags.id, name: subjectTags.name, count: sql<number>`(select count(*) from card_subject_tags cst where cst.tag_id = subject_tags.id)::int` })
     .from(subjectTags)
     .where(eq(subjectTags.userId, userId))
     .orderBy(desc(sql`3`), asc(subjectTags.name))
@@ -49,7 +49,7 @@ export async function autocompleteSubjects(userId: string, prefix: string) {
   const db = getDb();
   const p = normalizeSubject(prefix) ?? "";
   const rows = await db
-    .select({ id: subjectTags.id, name: subjectTags.name, count: sql<number>`(select count(*) from card_subject_tags cst where cst.tag_id = ${subjectTags.id})::int` })
+    .select({ id: subjectTags.id, name: subjectTags.name, count: sql<number>`(select count(*) from card_subject_tags cst where cst.tag_id = subject_tags.id)::int` })
     .from(subjectTags)
     .where(and(eq(subjectTags.userId, userId), p ? ilike(subjectTags.name, `${p}%`) : sql`true`))
     .orderBy(desc(sql`3`), asc(subjectTags.name))
@@ -103,8 +103,8 @@ export async function listThemes(userId: string, q?: string) {
       id: themes.id,
       name: themes.name,
       source: themes.source,
-      count: sql<number>`(select count(*) from card_themes ct join cards c on c.id = ct.card_id where ct.theme_id = ${themes.id} and c.killed_at is null)::int`,
-      lastUsedAt: sql<string | null>`(select max(ct.created_at) from card_themes ct where ct.theme_id = ${themes.id})`,
+      count: sql<number>`(select count(*) from card_themes ct join cards c on c.id = ct.card_id where ct.theme_id = themes.id and c.killed_at is null)::int`,
+      lastUsedAt: sql<string | null>`(select max(ct.created_at) from card_themes ct where ct.theme_id = themes.id)`,
     })
     .from(themes)
     .where(and(eq(themes.userId, userId), q ? ilike(themes.name, `%${q}%`) : sql`true`))

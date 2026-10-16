@@ -37,8 +37,8 @@ export async function listBoards(userId: string, archived = false): Promise<Boar
       name: boards.name,
       updatedAt: boards.updatedAt,
       archivedAt: boards.archivedAt,
-      cardCount: sql<number>`(select count(*) from board_items bi join cards c on c.id = bi.card_id where bi.board_id = ${boards.id} and c.killed_at is null)::int`,
-      clusterCount: sql<number>`(select count(*) from board_clusters bc where bc.board_id = ${boards.id})::int`,
+      cardCount: sql<number>`(select count(*) from board_items bi join cards c on c.id = bi.card_id where bi.board_id = boards.id and c.killed_at is null)::int`,
+      clusterCount: sql<number>`(select count(*) from board_clusters bc where bc.board_id = boards.id)::int`,
     })
     .from(boards)
     .where(and(eq(boards.userId, userId), archived ? sql`${boards.archivedAt} is not null` : isNull(boards.archivedAt)))
