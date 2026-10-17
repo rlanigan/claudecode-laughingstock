@@ -27,7 +27,8 @@ Set up and start the app:
 
 ```bash
 pnpm install
-cp .env.example .env.local
+cp -n .env.example .env.local
+sed -i '' '/^AUTH_SECRET=/d;/^CRON_SECRET=/d' .env.local
 echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env.local
 echo "CRON_SECRET=$(openssl rand -hex 32)" >> .env.local
 pnpm db:migrate      # creates the schema
