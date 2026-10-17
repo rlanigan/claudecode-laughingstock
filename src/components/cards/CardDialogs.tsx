@@ -16,7 +16,7 @@ export function SplitDialog({ open, onOpenChange, body, onSplit }: { open: boole
   }, [open, body.length]);
   const a = body.slice(0, at).trim();
   const b = body.slice(at).trim();
-  let offset = 0;
+  const offsets = tokens.reduce<number[]>((acc, tok, i) => { acc.push(i === 0 ? 0 : acc[i - 1] + tokens[i - 1].length); return acc; }, []);
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="Split into two cards" description="Click between words to place the split. The original card stays as it is." screenId="M12" width={520}
       footer={
@@ -28,10 +28,8 @@ export function SplitDialog({ open, onOpenChange, body, onSplit }: { open: boole
     >
       <p className="rounded-md border border-border bg-card p-3 text-[14px] leading-[1.6]">
         {tokens.map((tok, i) => {
-          const start = offset;
-          offset += tok.length;
           if (/^\s+$/.test(tok)) {
-            const here = start;
+            const here = offsets[i];
             return (
               <button key={i} type="button" aria-label="Split here" onClick={() => setAt(here)} className={cx("mx-[1px] inline-block h-[1.1em] w-[6px] cursor-col-resize rounded-sm align-middle", at === here ? "bg-accent" : "bg-transparent hover:bg-accent-tint")} />
             );

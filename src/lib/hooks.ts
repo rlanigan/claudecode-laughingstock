@@ -1,6 +1,6 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "./api-client";
 import { qk } from "./query-keys";
 import type { MeDTO } from "@/types/dto";
@@ -52,7 +52,8 @@ export function useOnline(): boolean {
 
 /** Global keyboard shortcut helper. Ignores events from editable targets unless `allowInInputs`. */
 export function useShortcut(key: string, handler: (e: KeyboardEvent) => void, opts: { meta?: boolean; shift?: boolean; allowInInputs?: boolean } = {}) {
-  const cb = useCallback(handler, [handler]);
+  const cb = useRef(handler);
+  useEffect(() => { cb.current = handler; }, [handler]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -63,11 +64,11 @@ export function useShortcut(key: string, handler: (e: KeyboardEvent) => void, op
       if (!!opts.shift !== e.shiftKey) return;
       if (e.key.toLowerCase() !== key.toLowerCase()) return;
       e.preventDefault();
-      cb(e);
+      cb.current(e);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [key, cb, opts.meta, opts.shift, opts.allowInInputs]);
+  }, [key, opts.meta, opts.shift, opts.allowInInputs]);
 }
 
 /** Debounced value. */

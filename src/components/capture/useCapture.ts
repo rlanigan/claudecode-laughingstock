@@ -28,7 +28,7 @@ export function useCapture(opts: { source: "phone" | "desktop"; saveOnHide?: boo
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const draftRef = useRef(draft);
-  draftRef.current = draft;
+  useEffect(() => { draftRef.current = draft; }, [draft]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
