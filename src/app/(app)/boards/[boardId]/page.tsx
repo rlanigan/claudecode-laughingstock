@@ -80,7 +80,12 @@ function BoardDesktop({ board }: { board: BoardDTO }) {
 
   const patchItem = useMutation({
     mutationFn: ({ itemId, body }: { itemId: string; body: Record<string, unknown> }) => api.patch<{ item: BoardItemDTO; deleted_cluster_id: string | null; created_cluster_id: string | null }>(`/board-items/${itemId}`, body),
-    onSuccess: (r) => { refresh(); if (r.created_cluster_id) setSelectedCluster(r.created_cluster_id); },
+    onSuccess: (r, vars) => {
+      // A plain nudge only needs the board back; cluster changes touch counts elsewhere too.
+      if ("cluster_id" in vars.body || "cluster_with_item_id" in vars.body || r.created_cluster_id || r.deleted_cluster_id) refresh();
+      else qc.invalidateQueries({ queryKey: qk.board(id) });
+      if (r.created_cluster_id) setSelectedCluster(r.created_cluster_id);
+    },
     onError: (e) => { toast(`Couldn't move card. ${e.message}`); refresh(); },
   });
   const addItem = useMutation({ mutationFn: ({ n, x, y }: { n: number; x?: number; y?: number }) => api.post(`/boards/${id}/items`, { card_number: n, x, y }), onSuccess: refresh, onError: (e) => toast(e.message) });

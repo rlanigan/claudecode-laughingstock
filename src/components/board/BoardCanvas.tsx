@@ -73,55 +73,62 @@ export interface BoardCanvasProps {
 function CanvasInner(p: BoardCanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
   const { zoom } = useViewport();
-  useEffect(() => p.onZoom?.(zoom), [zoom, p]);
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const pRef = useRef(p);
+  useEffect(() => { pRef.current = p; });
+  useEffect(() => { pRef.current.onZoom?.(zoom); }, [zoom]);
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [lasso, setLasso] = useState<string[]>([]);
-  const dragStart = useRef<{ id: string; x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    setPositions(Object.fromEntries(p.board.items.map((i) => [i.id, { x: i.x, y: i.y }])));
-  }, [p.board.items]);
+  /** Positions we've sent to the server but it hasn't echoed back yet, so a refetch doesn't snap the card. */
+  const pending = useRef<Record<string, { x: number; y: number }>>({});
 
   const visibleItems = useMemo(() => p.board.items.filter((i) => p.showKilled || i.card.killed_at === null), [p.board.items, p.showKilled]);
-  const rectOf = useCallback((i: BoardItemDTO): Rect => ({ x: positions[i.id]?.x ?? i.x, y: positions[i.id]?.y ?? i.y, w: CARD_W, h: CARD_H }), [positions]);
 
-  const nodes = useMemo<Node[]>(() => {
-    const out: Node[] = [];
-    for (const c of p.board.clusters) {
-      const members = visibleItems.filter((i) => i.cluster_id === c.id);
-      if (!members.length) continue;
-      const b = clusterBounds(members.map(rectOf));
-      out.push({ id: `cluster-${c.id}`, type: "cluster", position: { x: b.x, y: b.y }, data: { kind: "cluster", cluster: c, selected: p.selectedClusterId === c.id, w: b.w, h: b.h } as ClusterData, draggable: false, selectable: true, zIndex: 0, style: { width: b.w, height: b.h } });
-    }
-    for (const i of visibleItems) {
-      out.push({ id: i.id, type: "card", position: positions[i.id] ?? { x: i.x, y: i.y }, data: { kind: "card", item: i, selected: p.selectedItemId === i.id || lasso.includes(i.id), colorBy: p.colorBy, dropTarget: dropTarget === i.id, showKilled: p.showKilled } as CardData, zIndex: 1, dragHandle: undefined });
-    }
-    return out;
-  }, [p.board.clusters, visibleItems, positions, p.selectedItemId, p.selectedClusterId, p.colorBy, dropTarget, lasso, p.showKilled, rectOf]);
+  // Build the node list from the board, carrying over measured sizes and in-flight positions so React Flow
+  // never treats a card as uninitialised (it hides unmeasured nodes, which reads as flashing).
+  useEffect(() => {
+    setNodes((prev) => {
+      const prevById = new Map(prev.map((n) => [n.id, n]));
+      const cards: Node[] = visibleItems.map((i) => {
+        const old = prevById.get(i.id);
+        const pend = pending.current[i.id];
+        if (pend && pend.x === i.x && pend.y === i.y) delete pending.current[i.id];
+        const position = old?.dragging ? old.position : pending.current[i.id] ?? { x: i.x, y: i.y };
+        return { id: i.id, type: "card", position, measured: old?.measured, initialWidth: CARD_W, initialHeight: CARD_H, dragging: old?.dragging, selected: old?.selected, data: { kind: "card", item: i, selected: p.selectedItemId === i.id || lasso.includes(i.id), colorBy: p.colorBy, dropTarget: dropTarget === i.id, showKilled: p.showKilled } as CardData, zIndex: 1 };
+      });
+      return withClusters(cards, p.board.clusters, p.selectedClusterId);
+    });
+  }, [visibleItems, p.board.clusters, p.selectedItemId, p.selectedClusterId, p.colorBy, p.showKilled, lasso, dropTarget]);
+
+  const rectOf = useCallback((id: string, fallback: BoardItemDTO): Rect => {
+    const n = nodes.find((x) => x.id === id);
+    return { x: n?.position.x ?? fallback.x, y: n?.position.y ?? fallback.y, w: CARD_W, h: CARD_H };
+  }, [nodes]);
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     for (const ch of changes) {
-      if (ch.type === "position" && ch.position) setPositions((pos) => ({ ...pos, [ch.id]: ch.position! }));
       if (ch.type === "select" && ch.selected) {
-        if (ch.id.startsWith("cluster-")) { p.onSelectCluster(ch.id.slice(8)); p.onSelectItem(null); }
-        else { p.onSelectItem(ch.id); p.onSelectCluster(null); }
+        if (ch.id.startsWith("cluster-")) { pRef.current.onSelectCluster(ch.id.slice(8)); pRef.current.onSelectItem(null); }
+        else { pRef.current.onSelectItem(ch.id); pRef.current.onSelectCluster(null); }
       }
     }
-    void applyNodeChanges;
-  }, [p]);
+    setNodes((ns) => {
+      const next = applyNodeChanges(changes, ns);
+      const moved = changes.some((c) => c.type === "position");
+      return moved ? withClusters(next.filter((n) => n.type === "card"), pRef.current.board.clusters, pRef.current.selectedClusterId, next) : next;
+    });
+  }, []);
 
   const hoverTarget = useCallback((id: string, x: number, y: number): BoardItemDTO | null => {
     const me: Rect = { x: x + CARD_W / 2 - 20, y: y + CARD_H / 2 - 20, w: 40, h: 40 };
-    const hit = visibleItems.find((i) => i.id !== id && !i.cluster_id && rectsOverlap(me, rectOf(i)));
+    const hit = visibleItems.find((i) => i.id !== id && !i.cluster_id && rectsOverlap(me, rectOf(i.id, i)));
     return hit ?? null;
   }, [visibleItems, rectOf]);
 
-  const onNodeDragStart: OnNodeDrag = (_e, node) => { dragStart.current = { id: node.id, x: node.position.x, y: node.position.y }; };
   const onNodeDrag: OnNodeDrag = (_e, node) => {
     if (node.type !== "card") return;
     const t = hoverTarget(node.id, node.position.x, node.position.y);
-    setDropTarget(t?.id ?? null);
+    setDropTarget((cur) => (cur === (t?.id ?? null) ? cur : t?.id ?? null));
   };
   const onNodeDragStop: OnNodeDrag = (_e, node) => {
     if (node.type !== "card") return;
@@ -137,9 +144,10 @@ function CanvasInner(p: BoardCanvasProps) {
     for (const c of p.board.clusters) {
       const members = visibleItems.filter((i) => i.cluster_id === c.id && i.id !== item.id);
       if (!members.length) continue;
-      if (rectsOverlap(centre, clusterBounds(members.map(rectOf)))) { inside = c.id; break; }
+      if (rectsOverlap(centre, clusterBounds(members.map((m) => rectOf(m.id, m))))) { inside = c.id; break; }
     }
     if (inside !== item.cluster_id) clusterId = inside;
+    pending.current[item.id] = { x: node.position.x, y: node.position.y };
     p.onMove(item.id, node.position.x, node.position.y, clusterId);
   };
 
@@ -155,20 +163,26 @@ function CanvasInner(p: BoardCanvasProps) {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g" && lasso.length > 1) { e.preventDefault(); p.onGroupSelected?.(lasso); setLasso([]); }
-      if (p.selectedItemId && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+      const cur = pRef.current;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g" && lasso.length > 1) { e.preventDefault(); cur.onGroupSelected?.(lasso); setLasso([]); }
+      if (cur.selectedItemId && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
         e.preventDefault();
+        const id = cur.selectedItemId;
         const step = e.shiftKey ? 40 : 8;
-        const cur = positions[p.selectedItemId];
-        if (!cur) return;
-        const next = { x: cur.x + (e.key === "ArrowRight" ? step : e.key === "ArrowLeft" ? -step : 0), y: cur.y + (e.key === "ArrowDown" ? step : e.key === "ArrowUp" ? -step : 0) };
-        setPositions((pos) => ({ ...pos, [p.selectedItemId!]: next }));
-        p.onMove(p.selectedItemId, next.x, next.y, undefined);
+        setNodes((ns) => {
+          const n = ns.find((x) => x.id === id);
+          if (!n) return ns;
+          const next = { x: n.position.x + (e.key === "ArrowRight" ? step : e.key === "ArrowLeft" ? -step : 0), y: n.position.y + (e.key === "ArrowDown" ? step : e.key === "ArrowUp" ? -step : 0) };
+          pending.current[id] = next;
+          cur.onMove(id, next.x, next.y, undefined);
+          const moved = ns.map((x) => (x.id === id ? { ...x, position: next } : x));
+          return withClusters(moved.filter((x) => x.type === "card"), cur.board.clusters, cur.selectedClusterId, moved);
+        });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [lasso, p, positions]);
+  }, [lasso]);
 
   return (
     <ReactFlow
@@ -176,12 +190,11 @@ function CanvasInner(p: BoardCanvasProps) {
       edges={[]}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
-      onNodeDragStart={onNodeDragStart}
       onNodeDrag={onNodeDrag}
       onNodeDragStop={onNodeDragStop}
       onNodeDoubleClick={(_e, node) => { const it = p.board.items.find((i) => i.id === node.id); if (it) p.onDoubleClickCard(it); }}
       onPaneClick={() => { p.onSelectItem(null); p.onSelectCluster(null); setLasso([]); }}
-      onSelectionChange={({ nodes: sel }) => { const ids = sel.filter((n) => n.type === "card").map((n) => n.id); if (ids.length > 1) setLasso(ids); }}
+      onSelectionChange={({ nodes: sel }) => { const ids = sel.filter((n) => n.type === "card").map((n) => n.id); setLasso((cur) => (ids.length > 1 ? ids : cur.length ? [] : cur)); }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
       onDrop={onDrop}
       selectionOnDrag
@@ -201,6 +214,19 @@ function CanvasInner(p: BoardCanvasProps) {
       <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--border)" />
     </ReactFlow>
   );
+}
+
+/** Cluster outlines are derived from their members' current positions; they come first so cards render above. */
+function withClusters(cards: Node[], clusters: BoardClusterDTO[], selectedClusterId: string | null, prev: Node[] = []): Node[] {
+  const out: Node[] = [];
+  for (const c of clusters) {
+    const members = cards.filter((n) => (n.data as CardData).item.cluster_id === c.id);
+    if (!members.length) continue;
+    const b = clusterBounds(members.map((n) => ({ x: n.position.x, y: n.position.y, w: CARD_W, h: CARD_H })));
+    const old = prev.find((n) => n.id === `cluster-${c.id}`);
+    out.push({ id: `cluster-${c.id}`, type: "cluster", position: { x: b.x, y: b.y }, width: b.w, height: b.h, selected: old?.selected, data: { kind: "cluster", cluster: c, selected: selectedClusterId === c.id, w: b.w, h: b.h } as ClusterData, draggable: false, selectable: true, zIndex: 0 });
+  }
+  return [...out, ...cards];
 }
 
 export function BoardCanvas(props: BoardCanvasProps) {
